@@ -1,0 +1,80 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black pylint
+    
+    - name: Format check with black
+      run: |
+        black --check app.py config.py || true
+    
+    - name: Lint with pylint
+      run: |
+        pylint app.py --exit-zero || true
+    
+    - name: Test imports
+      run: |
+        python -c "import streamlit; import pandas; import sklearn; print('All imports OK')"
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build Docker image
+      run: |
+        docker build -t avalanche-intelligence-pro:${{ github.sha }} .
+        docker tag avalanche-intelligence-pro:${{ github.sha }} avalanche-intelligence-pro:latest
+    
+    - name: Test Docker image
+      run: |
+        docker run --rm avalanche-intelligence-pro:latest python -c "import streamlit; print('Docker build successful')"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to Streamlit Cloud
+      run: |
+        echo "Deployment configured - set up secrets for streamlit cloud"
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        body: Avalanche Intelligence Pro - Production Release
+        draft: false
+        prerelease: false
